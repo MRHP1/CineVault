@@ -47,11 +47,24 @@ export function initDB() {
       last_watched_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS subtitle_settings (
+      media_id TEXT PRIMARY KEY,
+      file_path TEXT,
+      delay REAL DEFAULT 0,
+      font_size TEXT DEFAULT '1em'
+    );
+
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT
     );
   `);
+  
+  try {
+    db.exec('ALTER TABLE watch_progress ADD COLUMN active_episode_id TEXT;');
+  } catch (e) {
+    // Column already exists
+  }
 }
 
 export function getSettings() {
@@ -85,6 +98,129 @@ export function getAllMedia() {
     ...row,
     metadata: JSON.parse(row.metadata || '{}')
   }));
+}
+
+export function getSeriesByTitle(title) {
+  const row = db.prepare('SELECT * FROM media WHERE type = ? AND title = ?').get('series', title);
+  if (row) {
+    return {
+      ...row,
+      metadata: JSON.parse(row.metadata || '{}')
+    };
+  }
+  return null;
+}
+
+export function insertEpisode(episode) {
+  const stmt = db.prepare('INSERT INTO episodes (id, series_id, season_number, episode_number, title, file_path, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)');
+  stmt.run(episode.id || uuidv4(), episode.series_id, episode.season_number, episode.episode_number, episode.title, episode.file_path, JSON.stringify(episode.metadata || {}));
+}
+
+export function getEpisodes(seriesId) {
+  return db.prepare('SELECT * FROM episodes WHERE series_id = ? ORDER BY season_number ASC, episode_number ASC').all(seriesId).map(row => ({
+    ...row,
+    metadata: JSON.parse(row.metadata || '{}')
+  }));
+}
+
+export function clearMedia() {
+  db.prepare('DELETE FROM episodes').run();
+  db.prepare('DELETE FROM watch_progress').run();
+  db.prepare('DELETE FROM media').run();
+}
+
+export function saveProgress(mediaId, mediaType, progressSeconds, activeEpisodeId = null) {
+  const existing = db.prepare('SELECT id FROM watch_progress WHERE media_id = ?').get(mediaId);
+  if (existing) {
+    db.prepare('UPDATE watch_progress SET progress_seconds = ?, active_episode_id = ?, last_watched_at = CURRENT_TIMESTAMP WHERE media_id = ?').run(progressSeconds, activeEpisodeId, mediaId);
+  } else {
+    db.prepare('INSERT INTO watch_progress (id, media_id, media_type, progress_seconds, active_episode_id) VALUES (?, ?, ?, ?, ?)').run(uuidv4(), mediaId, mediaType, progressSeconds, activeEpisodeId);
+  }
+}
+
+export function getProgress(mediaId, activeEpisodeId = null) {
+  const row = db.prepare('SELECT progress_seconds, active_episode_id FROM watch_progress WHERE media_id = ?').get(mediaId);
+  if (row) {
+    if (activeEpisodeId && row.active_episode_id && row.active_episode_id !== activeEpisodeId) {
+      return 0; // Changed episode, start from 0
+    }
+    return row.progress_seconds;
+  }
+  return 0;
+}
+
+export function getContinueWatching() {
+  const rows = db.prepare(`
+    SELECT wp.progress_seconds, wp.media_type, wp.media_id, wp.active_episode_id
+    FROM watch_progress wp
+    WHERE wp.progress_seconds > 5
+    ORDER BY wp.last_watched_at DESC
+    LIMIT 10
+  `).all();
+  
+  return rows.map(row => {
+    let item = null;
+    let series = null;
+    if (row.media_type === 'movie') {
+      item = db.prepare('SELECT * FROM media WHERE id = ?').get(row.media_id);
+    } else if (row.media_type === 'episode' || row.media_type === 'series') {
+      series = db.prepare('SELECT * FROM media WHERE id = ?').get(row.media_id);
+      if (row.active_episode_id) {
+        item = db.prepare('SELECT * FROM episodes WHERE id = ?').get(row.active_episode_id);
+      }
+    }
+    
+    if (item) {
+      item.metadata = JSON.parse(item.metadata || '{}');
+      item.progress = row.progress_seconds;
+      if (series) {
+        item.series = series;
+      }
+      return item;
+    }
+    return null;
+  }).filter(Boolean);
+}
+
+export function getGlobalVolume() {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('global_volume');
+  if (row) return parseFloat(row.value);
+  return 100;
+}
+
+export function saveGlobalVolume(volume) {
+  db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('global_volume', volume.toString());
+}
+
+export function getSubtitleSettings(mediaId) {
+  return db.prepare('SELECT * FROM subtitle_settings WHERE media_id = ?').get(mediaId);
+}
+
+export function saveSubtitleSettings(mediaId, filePath, delay, fontSize) {
+  db.prepare('INSERT OR REPLACE INTO subtitle_settings (media_id, file_path, delay, font_size) VALUES (?, ?, ?, ?)').run(mediaId, filePath, delay, fontSize);
+}
+
+export function updateMediaTitle(id, newTitle) {
+  db.prepare('UPDATE media SET title = ? WHERE id = ?').run(newTitle, id);
+}
+
+export function updateEpisodeTitle(id, newTitle) {
+  db.prepare('UPDATE episodes SET title = ? WHERE id = ?').run(newTitle, id);
+}
+
+export function deleteMedia(id) {
+  const episodes = db.prepare('SELECT id FROM episodes WHERE series_id = ?').all(id);
+  for (const ep of episodes) {
+    db.prepare('DELETE FROM watch_progress WHERE media_id = ?').run(ep.id);
+  }
+  db.prepare('DELETE FROM episodes WHERE series_id = ?').run(id);
+  db.prepare('DELETE FROM watch_progress WHERE media_id = ?').run(id);
+  db.prepare('DELETE FROM media WHERE id = ?').run(id);
+}
+
+export function deleteEpisode(id) {
+  db.prepare('DELETE FROM watch_progress WHERE media_id = ?').run(id);
+  db.prepare('DELETE FROM episodes WHERE id = ?').run(id);
 }
 
 export { db };

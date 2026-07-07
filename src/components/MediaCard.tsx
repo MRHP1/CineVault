@@ -1,5 +1,5 @@
 import React from 'react';
-import { Media } from '../types';
+import type { Media } from '../types';
 
 interface MediaCardProps {
   media: Media;
