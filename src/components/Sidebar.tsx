@@ -1,8 +1,8 @@
 import React from 'react';
 
 interface SidebarProps {
-  currentView: 'home' | 'library' | 'settings' | 'player';
-  setCurrentView: (view: 'home' | 'library' | 'settings') => void;
+  currentView: 'home' | 'library' | 'settings' | 'player' | 'series-detail';
+  setCurrentView: (view: 'home' | 'library' | 'settings' | 'player' | 'series-detail') => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView }) => {

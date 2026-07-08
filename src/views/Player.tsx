@@ -55,7 +55,7 @@ const Player: React.FC<PlayerProps> = ({ media, onClose }) => {
     if (rawVtt) {
       const applyVttDelay = (vtt: string, delaySeconds: number) => {
         if (delaySeconds === 0) return vtt;
-        return vtt.replace(/(\d{2,}:)?(\d{2}):(\d{2})\.(\d{3})/g, (match, h, m, s, ms) => {
+        return vtt.replace(/(\d{2,}:)?(\d{2}):(\d{2})\.(\d{3})/g, (_match, h, m, s, ms) => {
           let hours = h ? parseInt(h) : 0;
           let minutes = parseInt(m);
           let seconds = parseInt(s);
